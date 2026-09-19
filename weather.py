@@ -12,26 +12,24 @@ MAX_RETRY = 2
 RETRY_DELAY = 3
 # ====================================================
 
-API_HOST = "mc76xbbbde.re.qweatherapi.com"
+API_HOST = "https://devapi.qweather.com"
 
-def request_with_retry(url, timeout=12):
-    for attempt in range(MAX_RETRY + 1):
+def request_with_retry(url, timeout=25):
+    for attempt in range(MAX_RETRY):
         try:
             resp = requests.get(url, timeout=timeout)
             resp.raise_for_status()
             return resp
         except Exception as e:
-            if attempt < MAX_RETRY:
-                print(f"请求失败，{RETRY_DELAY}秒后重试 ({attempt+1}/{MAX_RETRY})：{e}")
-                time.sleep(RETRY_DELAY)
-            else:
-                raise e
+            print(f"请求失败，{RETRY_DELAY}秒后重试 ({attempt+1}/{MAX_RETRY})：{e}")
+            time.sleep(RETRY_DELAY)
+    raise Exception("多次请求全部失败")
 
 def get_location_info(city_id):
-    url = f"https://{API_HOST}/geo/v2/city/lookup?location={city_id}&key={WEATHER_KEY}"
-    resp_raw = request_with_retry(url)
-    resp = resp_raw.json()
-    loc = resp["location"][0]
+    url = f"{API_HOST}/geo/v2/city/lookup?location={city_id}&key={WEATHER_KEY}"
+    resp = request_with_retry(url)
+    data = resp.json()
+    loc = data["location"][0]
     return {
         "province": loc["adm1"],
         "city": loc["adm2"],
@@ -39,13 +37,17 @@ def get_location_info(city_id):
     }
 
 def get_weather(city_id):
-    url_now = f"https://{API_HOST}/v7/weather/now?location={city_id}&key={WEATHER_KEY}"
-    res_now = request_with_retry(url_now).json()
+    # 实时天气
+    url_now = f"{API_HOST}/v7/weather/now?location={city_id}&key={WEATHER_KEY}"
+    resp_now = request_with_retry(url_now)
+    res_now = resp_now.json()
     now = res_now["now"]
 
-    url_day = f"https://{API_HOST}/v7/weather/3d?location={city_id}&key={WEATHER_KEY}"
-    res_day = request_with_retry(url_day).json()
-    today = res_day["daily"][0]
+    # 3天预报
+    url_3d = f"{API_HOST}/v7/weather/3d?location={city_id}&key={WEATHER_KEY}"
+    resp_3d = request_with_retry(url_3d)
+    res_3d = resp_3d.json()
+    today = res_3d["daily"][0]
     return now, today
 
 def get_clothing_advice(feels_temp, wind_scale, humidity, uv_index):
@@ -104,7 +106,8 @@ def process_one_user(bark_key, city_id):
     wind_dir = now["windDir"]
     wind_scale = now["windScale"]
     humidity = now["humidity"]
-    uv_index = now["uvIndex"]
+    # ✅安全读取uvIndex，不存在就默认0，解决KeyError
+    uv_index = now.get("uvIndex", 0)
 
     dress_advice = get_clothing_advice(feels, wind_scale, humidity, uv_index)
 
