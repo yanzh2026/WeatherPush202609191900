@@ -4,8 +4,8 @@ import time
 
 # ====================== 配置区 ======================
 WEATHER_KEY = os.getenv("WEATHER_KEY")
-CITY_ID = "101280102"       # 番禺
-BARK_KEY = os.getenv("BARK_KEY")
+# 用户列表：一行一条，格式 BarkKey|CityId，多行
+RAW_USERS = os.getenv("BARK_USERS", "")
 BARK_EXTRA = "?sound=alert"
 
 MAX_RETRY = 2
@@ -27,8 +27,8 @@ def request_with_retry(url, timeout=12):
             else:
                 raise e
 
-def get_location_info():
-    url = f"https://{API_HOST}/geo/v2/city/lookup?location={CITY_ID}&key={WEATHER_KEY}"
+def get_location_info(city_id):
+    url = f"https://{API_HOST}/geo/v2/city/lookup?location={city_id}&key={WEATHER_KEY}"
     resp_raw = request_with_retry(url)
     resp = resp_raw.json()
     loc = resp["location"][0]
@@ -38,65 +38,109 @@ def get_location_info():
         "district": loc["name"]
     }
 
-def get_weather():
-    url_now = f"https://{API_HOST}/v7/weather/now?location={CITY_ID}&key={WEATHER_KEY}"
+def get_weather(city_id):
+    url_now = f"https://{API_HOST}/v7/weather/now?location={city_id}&key={WEATHER_KEY}"
     res_now = request_with_retry(url_now).json()
     now = res_now["now"]
 
-    url_day = f"https://{API_HOST}/v7/weather/3d?location={CITY_ID}&key={WEATHER_KEY}"
+    url_day = f"https://{API_HOST}/v7/weather/3d?location={city_id}&key={WEATHER_KEY}"
     res_day = request_with_retry(url_day).json()
     today = res_day["daily"][0]
     return now, today
 
-def get_dress(temp):
-    t = int(temp)
-    if t < 10:
-        return "🧥厚外套+毛衣，注意防寒保暖"
-    elif t < 20:
-        return "🧥薄外套/风衣，早晚温差大"
-    elif t < 28:
-        return "👕短袖薄长袖均可，薄长裤"
-    else:
-        return "☀️短袖短裤，做好防晒防暑"
+def get_clothing_advice(feels_temp, wind_scale, humidity, uv_index):
+    """综合体感、风力、湿度、紫外线生成穿搭建议"""
+    t = int(feels_temp)
+    wind = int(wind_scale)
+    hum = int(humidity)
+    uv = int(uv_index)
 
-def send_bark(title, body):
-    url = f"https://api.day.app/{BARK_KEY}/{title}/{body}{BARK_EXTRA}"
+    base_tip = ""
+
+    # 基础温度档位
+    if t >= 30:
+        base_tip = "☀️炎热，短袖短裤为主"
+    elif t >= 24:
+        base_tip = "🌞偏热，短袖T恤，薄长裤或短裤均可"
+    elif t >= 18:
+        base_tip = "😌温度舒适，短袖或薄长袖，随身备一件薄外套"
+    elif t >= 12:
+        base_tip = "🍂微凉，长袖上衣，建议薄外套/风衣"
+    elif t >= 5:
+        base_tip = "🧥偏冷，厚长袖加外套，注意保暖"
+    else:
+        base_tip = "❄️严寒，厚棉衣/羽绒服，做好防寒"
+
+    extra = []
+    # 风力补充
+    if wind >= 4:
+        extra.append("风力偏大，注意防风")
+    # 湿度：闷热潮湿 / 干燥
+    if hum >=75 and t >=22:
+        extra.append("湿度高，体感闷热")
+    elif hum <=30:
+        extra.append("空气干燥，注意补水保湿")
+    # 紫外线
+    if uv >=5:
+        extra.append("紫外线较强，外出做好防晒")
+
+    if extra:
+        base_tip += "；" + "，".join(extra)
+    return base_tip
+
+def send_bark(title, body, bark_key):
+    url = f"https://api.day.app/{bark_key}/{title}/{body}{BARK_EXTRA}"
     r = request_with_retry(url)
-    print("Bark返回：", r.json())
+    print(f"设备[{bark_key[:8]}...] 返回：{r.json()}")
+
+def process_one_user(bark_key, city_id):
+    print(f"\n--- 开始处理设备 {bark_key[:8]}，城市ID:{city_id} ---")
+    loc = get_location_info(city_id)
+    now, today = get_weather(city_id)
+
+    temp = now["temp"]
+    feels = now["feelsLike"]
+    weather_text = now["text"]
+    wind_dir = now["windDir"]
+    wind_scale = now["windScale"]
+    humidity = now["humidity"]
+    uv_index = now["uvIndex"]
+
+    dress_advice = get_clothing_advice(feels, wind_scale, humidity, uv_index)
+
+    t_max = today["tempMax"]
+    t_min = today["tempMin"]
+    precip = float(today["precip"])
+
+    rain_tip = "\n☔⚠️今日有雨，出门记得带伞" if precip > 0 else ""
+
+    city_name = loc["district"]
+    title = f"🌤{city_name}每日天气提醒"
+    content = f"""📍{loc['province']}{loc['city']}{loc['district']}
+🌤天气：{weather_text}
+🌡气温{temp}℃｜体感{feels}℃
+📅今日 {t_min}~{t_max}℃
+💧湿度：{humidity}%
+💨风力：{wind_dir}{wind_scale}级
+☀️紫外线等级：{uv_index}
+
+👔穿搭建议：{dress_advice}{rain_tip}"""
+    print(content)
+    send_bark(title, content, bark_key)
 
 def main():
-    try:
-        print("====获取番禺天气====")
-        loc = get_location_info()
-        now, today = get_weather()
-
-        temp = now["temp"]
-        feels = now["feelsLike"]
-        weather_text = now["text"]
-        wind = f'{now["windDir"]}{now["windScale"]}级'
-        humidity = now["humidity"]
-        dress = get_dress(temp)
-
-        t_max = today["tempMax"]
-        t_min = today["tempMin"]
-        precip = float(today["precip"])
-
-        rain_tip = "\n☔⚠️今日有雨，出门记得带伞" if precip > 0 else ""
-
-        title = "🌤番禺每日天气提醒"
-        content = f"""📍{loc['province']}{loc['city']}{loc['district']}
-🌤天气：{weather_text}
-🌡当前{temp}℃｜体感{feels}℃
-📅今日 {t_min}~{t_max}℃
-💧湿度：{humidity}%｜降水：{precip}mm
-💨风力：{wind}
-
-👔穿搭建议：{dress}{rain_tip}"""
-        print(content)
-        send_bark(title, content)
-        print("✅推送完成")
-    except Exception as e:
-        print(f"❌执行异常：{e}")
+    lines = RAW_USERS.splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line or "|" not in line:
+            continue
+        bark_key, city_id = line.split("|")
+        bark_key = bark_key.strip()
+        city_id = city_id.strip()
+        try:
+            process_one_user(bark_key, city_id)
+        except Exception as e:
+            print(f"❌设备{bark_key[:8]}处理失败：{e}")
 
 if __name__ == "__main__":
     main()

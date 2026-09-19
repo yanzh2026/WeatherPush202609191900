@@ -1,8 +1,7 @@
-name: 番禺天气推送
+name: 多地区天气推送
 on:
   workflow_dispatch:
   schedule:
-    # UTC23点 = 北京时间早上7点
     - cron: '0 23 * * *'
 
 jobs:
@@ -23,5 +22,5 @@ jobs:
       - name: 运行脚本
         env:
           WEATHER_KEY: ${{ secrets.WEATHER_KEY }}
-          BARK_KEY: ${{ secrets.BARK_KEY }}
+          BARK_USERS: ${{ secrets.BARK_USERS }}
         run: python weather.py
