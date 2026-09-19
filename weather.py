@@ -12,7 +12,7 @@ MAX_RETRY = 2
 RETRY_DELAY = 3
 # ====================================================
 
-API_HOST = "mc76xbbbde.re.qweatherapi.com"
+API_HOST = "https://mc76xbbbde.re.qweatherapi.com"
 
 def request_with_retry(url, timeout=25):
     for attempt in range(MAX_RETRY):
