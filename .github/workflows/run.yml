@@ -2,7 +2,7 @@ name: 多地区天气推送
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 14 * * *'
+    - cron: '30 14 * * *'
 
 jobs:
   run-task:
